@@ -10,7 +10,7 @@ import Foundation
 //        !-operator
 //########################################################
 
-//Representations of the parse process state
+//Representations of the parse process states
 enum States {
     case INIT
     case ITEM
@@ -33,17 +33,19 @@ let TAG_DATE : NSString = "pubDate"
 
 class RSSItem {
     var title : NSString?
-    var date : NSString?
+	var description : NSString?
     var link : NSString?
 	var author : NSString?
 	var guid : NSString?
+	var date : NSString?
     
     init() {
         title = nil
-        date = nil
+		description = nil
         link = nil
 		author = nil
 		guid = nil
+		date = nil
     }
     
     func setTitle( title : NSString? ) {
@@ -53,14 +55,14 @@ class RSSItem {
     func getTitle() -> NSString? {
         return title
     }
-    
-    func setDate( date : NSString? ) {
-        self.date = date
-    }
-    
-    func getDate() -> NSString? {
-        return date
-    }
+	
+	func setDescription( description : NSString? ) {
+		self.description = description
+	}
+	
+	func getDescription() -> NSString? {
+		return description
+	}
     
     func setLink( link : NSString? ) {
         self.link = link
@@ -85,6 +87,14 @@ class RSSItem {
 	func getGUID() -> NSString? {
 		return guid
 	}
+	
+	func setDate( date : NSString? ) {
+		self.date = date
+	}
+	
+	func getDate() -> NSString? {
+		return date
+	}
 }
 
 class RSSXMLDelegate : NSObject, NSXMLParserDelegate {
@@ -106,7 +116,7 @@ class RSSXMLDelegate : NSObject, NSXMLParserDelegate {
         temporaryRSSItem = nil
     }
     
-    func parser( _parser: NSXMLParser, didStartElement elementName: String, namespaceURI namespaceURI: String?, qualifiedName qualifiedName: String?,attributes attributeDict: [NSObject : AnyObject]) {
+    func parser( _parser: NSXMLParser, didStartElement elementName: String, namespaceURI: String?, qualifiedName: String?,attributes attributeDict: [NSObject : AnyObject]) {
         
         /*Standard structure:
          *<item>
@@ -118,13 +128,13 @@ class RSSXMLDelegate : NSObject, NSXMLParserDelegate {
          *  <pubDate></pubDate>
          *</item>*/
         
-        //Valid states
-        // Start = INIT
-        // INIT --> ITEM
-        // ITEM --> TITLE
-        // TITLE --> DESCRIPTION (Do nothing)
-        // TITLE OR DESCRIPTION --> LINK
-        // LINK --> DATE
+        /*Valid states
+        *  Start = INIT
+        *  INIT | TITLE | DESCRIPTION | LINK | DATE --> ITEM
+        *  ITEM --> TITLE
+        *  TITLE --> DESCRIPTION
+        *  TITLE OR DESCRIPTION --> LINK
+        *  LINK --> DATE */
         
         switch( elementName ) {
             case TAG_ITEM:
@@ -155,14 +165,21 @@ class RSSXMLDelegate : NSObject, NSXMLParserDelegate {
                 }
                 break
 			case TAG_AUTHOR:
-				//if( state == States.LINK ) {
-				//	state = States.AUTHOR
-				//}
+				if( state == States.LINK || state == States.TITLE ||
+					state == States.DESCRIPTION ) {
+					state = States.AUTHOR
+				}
 				break
 			case TAG_GUID:
+				if( state == States.LINK || state == States.TITLE ||
+					state == States.DESCRIPTION || state == States.AUTHOR ) {
+						state = States.GUID
+				}
 				break
             case TAG_DATE:
-                if( state == States.LINK ) {
+				if( state == States.LINK || state == States.TITLE ||
+					state == States.DESCRIPTION || state == States.AUTHOR ||
+					state == States.GUID ) {
                     state = States.DATE
                 }
                 break
@@ -175,7 +192,10 @@ class RSSXMLDelegate : NSObject, NSXMLParserDelegate {
     func parser( _parser: NSXMLParser, foundCharacters string: String? ) {
         //Get the content of the XML node
         var title : NSString?
+		var description : NSString?
         var link : NSString?
+		var author : NSString?
+		var guid : NSString?
         var date : NSString?
         
         switch( state ) {
@@ -199,7 +219,22 @@ class RSSXMLDelegate : NSObject, NSXMLParserDelegate {
                 }
             }
             break
-            
+		case States.DESCRIPTION:
+			//Get the description of the post
+			if let tempItem = temporaryRSSItem {
+				description = tempItem.getDescription()
+				if let d = description {
+					if let s = string {
+						description = d.stringByAppendingString( s )
+						tempItem.setDescription( description )
+					}
+				} else {
+					if let s = string {
+						tempItem.setDescription( s )
+					}
+				}
+			}
+			break
         case States.LINK:
             //Get the url for the link to the original site
             if let tempItem = temporaryRSSItem {
@@ -212,7 +247,35 @@ class RSSXMLDelegate : NSObject, NSXMLParserDelegate {
                 }
             }
             break
-            
+			
+		case States.AUTHOR:
+			//Get the author of the post
+			if let tempItem = temporaryRSSItem {
+				author = tempItem.getAuthor()
+				if( author == nil ) {
+					author = string
+					
+					if let a = author {
+						tempItem.setAuthor( a )
+					}
+				}
+			}
+			break
+			
+		case States.GUID:
+			//Get the guid of the post
+			if let tempItem = temporaryRSSItem {
+				guid = tempItem.getGUID()
+				if( guid == nil ) {
+					guid = string
+					
+					if let g = guid {
+						tempItem.setGUID( g )
+					}
+				}
+			}
+			break
+			
         case States.DATE:
             //Get the date for the post
             if let tempItem = temporaryRSSItem {
@@ -240,7 +303,7 @@ class RSSXMLDelegate : NSObject, NSXMLParserDelegate {
 // GPL V2
 //~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
-var rssURL : NSURL? = NSURL( string: "http://www.fernuni-hagen.de/universitaet/include/aktuelles_rss.xml" )
+var rssURL : NSURL? = NSURL( string: "http://www.faz.net/rss/aktuell/" )
 var rssItems = [RSSItem]()
 
 if let url = rssURL {
@@ -258,18 +321,27 @@ if let url = rssURL {
             rssItems = xmlDelegate.getItemsList()
             
             for item in rssItems {
-                var title : NSString?
-                var link : NSString?
-                var date : NSString?
-                
+                                
                 if let title = item.getTitle() {
                     println( title )
                 }
-                
+				
+				if let description = item.getDescription() {
+					println( description )
+				}
+				
                 if let link = item.getLink() {
                     println( link )
                 }
-                
+				
+				if let author = item.getAuthor() {
+					println( author )
+				}
+				
+				if let guid = item.getGUID() {
+					println( guid )
+				}
+				
                 if let date = item.getDate() {
                     println( date )
                 }
